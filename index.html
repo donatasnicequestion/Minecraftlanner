@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Minecraft Schematic 3D Viewer</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a1a; color: white; }
+    
+    /* Linkes Menü: Steuerung */
+    #ui {
+      position: absolute; top: 15px; left: 15px; z-index: 10;
+      background: rgba(20, 20, 20, 0.88); padding: 15px 20px;
+      border-radius: 10px; border: 2px solid #444; width: 290px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    /* Rechtes Menü: Material-Liste */
+    #materialPanel {
+      position: absolute; top: 15px; right: 15px; z-index: 10;
+      background: rgba(20, 20, 20, 0.88); padding: 15px 18px;
+      border-radius: 10px; border: 2px solid #444; width: 310px;
+      max-height: calc(100vh - 60px); display: flex; flex-direction: column;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    h2 { margin: 0 0 10px 0; font-size: 17px; color: #55ff55; display: flex; align-items: center; justify-content: space-between; }
+    .control-group { margin-bottom: 12px; }
+    label { display: block; font-size: 13px; margin-bottom: 4px; color: #ccc; }
+    input[type="range"], input[type="file"], select, button {
+      width: 100%; box-sizing: border-box; margin-top: 4px;
+    }
+    select, input[type="file"] {
+      background: #2b2b2b; color: white; border: 1px solid #555; padding: 6px; border-radius: 4px;
+    }
+    button {
+      background: #3b8526; color: white; border: none; padding: 9px;
+      border-radius: 5px; cursor: pointer; font-weight: bold; margin-top: 6px;
+    }
+    button:hover { background: #4ca832; }
+    
+    .hint { font-size: 12px; color: #aaa; line-height: 1.45; margin-top: 10px; border-top: 1px solid #444; padding-top: 8px; }
+
+    /* Material-Liste Styling */
+    .mat-filter {
+      font-size: 12px; color: #ddd; margin-bottom: 10px; padding-bottom: 8px;
+      border-bottom: 1px solid #444; display: flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .mat-filter input { cursor: pointer; }
+    
+    #materialList {
+      overflow-y: auto; flex: 1; padding-right: 4px;
+    }
+    #materialList::-webkit-scrollbar { width: 6px; }
+    #materialList::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+    .mat-item {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255, 255, 255, 0.05); padding: 6px 8px;
+      border-radius: 6px; margin-bottom: 6px; border: 1px solid rgba(255,255,255,0.08);
+    }
+    .mat-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .mat-icon {
+      width: 28px; height: 28px; border-radius: 4px; background: #333;
+      image-rendering: pixelated; border: 1px solid #555; flex-shrink: 0;
+    }
+    .mat-name {
+      font-size: 13px; font-weight: 500; color: #eee;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mat-right { text-align: right; flex-shrink: 0; margin-left: 8px; }
+    .mat-count { font-size: 14px; font-weight: bold; color: #55ff55; }
+    .mat-stacks { font-size: 11px; color: #aaa; }
+
+    /* Fadenkreuz in der Mitte */
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      width: 12px; height: 12px; transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 5;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255,255,255,0.75);
+    }
+    #crosshair::before { top: 5px; left: 0; width: 12px; height: 2px; }
+    #crosshair::after { top: 0; left: 5px; width: 2px; height: 12px; }
+  </style>
+
+  <!-- Pako zum Entpacken von .schem Dateien -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+  
+  <!-- Three.js Importmap -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <div id="crosshair"></div>
+
+  <!-- Linkes Panel: Steuerung -->
+  <div id="ui">
+    <h2>⛏️ Schematic Viewer</h2>
+    
+    <div class="control-group">
+      <label><b>.schem Datei einfügen:</b></label>
+      <input type="file" id="fileInput" accept=".schem,.schematic">
+    </div>
+
+    <div class="control-group">
+      <label>Ansichts-Modus:</label>
+      <select id="layerMode">
+        <option value="all">Komplettes Gebäude</option>
+        <option value="upTo">Aufbau: Bis Layer anzeigen</option>
+        <option value="single">Einzeln: Nur aktuellen Layer zeigen</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Aktueller Layer (Y): <strong id="layerVal">Alle</strong></label>
+      <input type="range" id="layerSlider" min="0" max="10" value="10">
+    </div>
+
+    <div class="control-group">
+      <label>Fluggeschwindigkeit: <strong id="speedVal">20</strong></label>
+      <input type="range" id="speedSlider" min="5" max="100" value="20">
+    </div>
+
+    <button id="flyBtn">🕹️ In 3D-Welt klicken zum Fliegen</button>
+
+    <div class="hint">
+      <b>Steuerung:</b><br>
+      • <b>W, A, S, D</b>: Herumfliegen<br>
+      • <b>Leertaste / Shift</b>: Hoch / Runter<br>
+      • <b>Pfeiltasten ⬆️ / ⬇️</b>: Layer wechseln<br>
+      • <b>ESC</b>: Mauszeiger befreien
+    </div>
+  </div>
+
+  <!-- Rechtes Panel: Material-Liste -->
+  <div id="materialPanel">
+    <h2>
+      <span>📦 Materialien</span>
+      <span id="totalBlocksBadge" style="font-size: 13px; color: #ccc; font-weight: normal;">0 Blöcke</span>
+    </h2>
+    
+    <label class="mat-filter">
+      <input type="checkbox" id="onlyVisibleLayerCheck" checked>
+      Nur aktuell sichtbare Layer zählen
+    </label>
+
+    <div id="materialList"></div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
